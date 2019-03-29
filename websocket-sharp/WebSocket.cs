@@ -50,6 +50,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using WebSocketSharp.Net;
 using WebSocketSharp.Net.WebSockets;
 
@@ -1171,10 +1172,7 @@ namespace WebSocketSharp
       PayloadData payloadData, bool send, bool receive, bool received
     )
     {
-      Action<PayloadData, bool, bool, bool> closer = close;
-      closer.BeginInvoke (
-        payloadData, send, receive, received, ar => closer.EndInvoke (ar), null
-      );
+      Task.Run(() => close(payloadData, send, receive, received));
     }
 
     private bool closeHandshake (byte[] frameAsBytes, bool receive, bool received)
@@ -1552,7 +1550,7 @@ namespace WebSocketSharp
         e = _messageEventQueue.Dequeue ();
       }
 
-      _message.BeginInvoke (e, ar => _message.EndInvoke (ar), null);
+      Task.Run(() => _message(e));
     }
 
     private bool ping (byte[] data)
@@ -1952,26 +1950,21 @@ namespace WebSocketSharp
 
     private void sendAsync (Opcode opcode, Stream stream, Action<bool> completed)
     {
-      Func<Opcode, Stream, bool> sender = send;
-      sender.BeginInvoke (
-        opcode,
-        stream,
-        ar => {
-          try {
-            var sent = sender.EndInvoke (ar);
-            if (completed != null)
-              completed (sent);
-          }
-          catch (Exception ex) {
-            _logger.Error (ex.ToString ());
-            error (
-              "An error has occurred during the callback for an async send.",
-              ex
-            );
-          }
-        },
-        null
-      );
+      var task = Task.Run<bool>(() => send(opcode, stream));
+      if (completed != null)
+        task.ContinueWith(
+          r => {
+            try {
+              completed?.Invoke(r.Result);
+            }
+            catch (Exception ex) {
+              _logger.Error(ex.ToString());
+              error(
+                "An error has occurred during the callback for an async send.",
+                ex
+              );
+            }
+          });
     }
 
     private bool sendBytes (byte[] bytes)
@@ -2549,14 +2542,8 @@ namespace WebSocketSharp
         throw new InvalidOperationException (msg);
       }
 
-      Func<bool> acceptor = accept;
-      acceptor.BeginInvoke (
-        ar => {
-          if (acceptor.EndInvoke (ar))
-            open ();
-        },
-        null
-      );
+      var task = Task.Run(() => accept());
+      task.ContinueWith(r => { if (r.Result) open(); });
     }
 
     /// <summary>
@@ -3282,14 +3269,8 @@ namespace WebSocketSharp
         throw new InvalidOperationException (msg);
       }
 
-      Func<bool> connector = connect;
-      connector.BeginInvoke (
-        ar => {
-          if (connector.EndInvoke (ar))
-            open ();
-        },
-        null
-      );
+      var task = Task.Run<bool>(() => connect());
+      task.ContinueWith(r => { if (r.Result) open(); });
     }
 
     /// <summary>
